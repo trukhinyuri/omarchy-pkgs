@@ -1,0 +1,52 @@
+# Maintainer: Yuri (IURII) Trukhin <1245379+trukhinyuri@users.noreply.github.com>
+# Contributor: Leon Marzoll (proart_battery)
+#
+# The ASUS ProArt P16 H7607BA (NVIDIA N1x) reaches its EC through FF-A, which
+# linux-omarchy's nvidia-ffa-ec (1010) carries. On BIOS H7607BA.303 the stock
+# ACPI battery, AC adapter, fan and thermal zones should work through it; what
+# ACPI does not offer is the charge limit, the ASUS fan modes and the EC's own
+# sensors. proart_battery adds those. On BIOS H7607BA.300, whose EC accessors
+# echo the request back, it instead provides the battery and AC adapter itself.
+# It decides at load time ("mode=auto"), by reading one EC register through the
+# AML and directly.
+#
+# Build it as DKMS until it can go into linux-omarchy as a patch, which needs
+# its author's sign-off.
+
+pkgname=asus-proart-p16-ec-dkms
+_modname=proart-battery
+pkgver=2.0
+pkgrel=1
+_commit=13f6ec9ac22666a20b05b342c79bd2e52a84e594
+pkgdesc='Charge limit, fan modes and EC sensors for the ASUS ProArt P16 (H7607BA) (DKMS)'
+arch=('aarch64')
+url='https://github.com/trukhinyuri/proart-p16-linux'
+license=('GPL-2.0-only')
+depends=('dkms')
+options=('!debug')
+source=("proart-p16-linux::git+https://github.com/trukhinyuri/proart-p16-linux.git#commit=$_commit"
+        'asus-proart-p16-ec.conf')
+sha256sums=('SKIP'
+            'SKIP')
+
+prepare() {
+  cd proart-p16-linux/drivers/proart-battery
+  # Linux 7.2 renamed the ACPI battery hook functions; the driver was written
+  # against NVIDIA's 7.0.
+  sed -i 's/\bbattery_hook_register(/acpi_battery_hook_register(/;
+          s/\bbattery_hook_unregister(/acpi_battery_hook_unregister(/' proart_battery.c
+}
+
+package() {
+  local src=proart-p16-linux/drivers/proart-battery
+  local dest="$pkgdir/usr/src/$_modname-$pkgver"
+
+  install -Dm644 "$src/proart_battery.c" "$dest/proart_battery.c"
+  install -Dm644 "$src/Makefile" "$dest/Makefile"
+  install -Dm644 "$src/dkms.conf" "$dest/dkms.conf"
+  install -Dm644 "$src/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm755 "$src/check-acpi.sh" "$pkgdir/usr/share/doc/$pkgname/check-acpi.sh"
+  # Not a device driver that udev would load: load it at boot. It refuses to
+  # load on anything but board H7607BA.
+  install -Dm644 asus-proart-p16-ec.conf "$pkgdir/usr/lib/modules-load.d/asus-proart-p16-ec.conf"
+}

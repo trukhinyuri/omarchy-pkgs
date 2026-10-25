@@ -149,7 +149,7 @@ The patches not written for this package, and where they come from:
 
 The rest are by Brandon Williams.
 
-The config adds `SPI_HID`, `SPI_HID_CORE`, `SPI_HID_OF`, `VIDEO_IMX681`, `VIDEO_VD55G0` and `QCOM_ADSP_PWR_LMTS` as modules.
+The config adds `SPI_HID`, `SPI_HID_CORE`, `SPI_HID_OF`, `SPI_HID_ACPI`, `VIDEO_IMX681`, `VIDEO_VD55G0` and `QCOM_ADSP_PWR_LMTS` as modules.
 
 ### Yoga Slim 7x
 

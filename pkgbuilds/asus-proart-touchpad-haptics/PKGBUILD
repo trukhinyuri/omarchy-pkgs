@@ -1,0 +1,29 @@
+# Maintainer: Yuri (IURII) Trukhin <1245379+trukhinyuri@users.noreply.github.com>
+# Contributor: Leon Marzoll (proart-haptic)
+
+pkgname=asus-proart-touchpad-haptics
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Haptic click feedback for the ASUS ProArt P16 (H7607BA) touchpad'
+arch=('aarch64')
+url='https://github.com/trukhinyuri/proart-p16-linux'
+license=('GPL-2.0-only')
+depends=('python')
+backup=('etc/default/asus-proart-touchpad-haptics')
+options=('!debug')
+source=(
+  '70-asus-proart-touchpad-haptics.rules'
+  'README.package.md'
+  'asus-proart-touchpad-haptics'
+  'asus-proart-touchpad-haptics.default'
+  'asus-proart-touchpad-haptics.service'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -Dm755 asus-proart-touchpad-haptics "$pkgdir/usr/bin/asus-proart-touchpad-haptics"
+  install -Dm644 asus-proart-touchpad-haptics.service "$pkgdir/usr/lib/systemd/system/asus-proart-touchpad-haptics.service"
+  install -Dm644 70-asus-proart-touchpad-haptics.rules "$pkgdir/usr/lib/udev/rules.d/70-asus-proart-touchpad-haptics.rules"
+  install -Dm644 asus-proart-touchpad-haptics.default "$pkgdir/etc/default/asus-proart-touchpad-haptics"
+  install -Dm644 README.package.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

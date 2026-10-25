@@ -1,0 +1,15 @@
+[Unit]
+Description=Haptic click feedback for the ASUS ProArt P16 touchpad
+Documentation=file:///usr/share/doc/asus-proart-touchpad-haptics/README.md
+
+[Service]
+Type=simple
+SyslogIdentifier=asus-proart-touchpad-haptics
+ExecStart=/usr/bin/asus-proart-touchpad-haptics
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes

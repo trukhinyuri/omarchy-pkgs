@@ -1,0 +1,12 @@
+# Haptic click feedback of the ASUS ProArt P16 touchpad
+# (asus-proart-touchpad-haptics.service). After a change:
+#   sudo systemctl restart asus-proart-touchpad-haptics
+# Try the waveforms:
+#   sudo asus-proart-touchpad-haptics test
+# Waveform ordinal 3-7 (the pad's waveforms last 13/21/24/26/28 ms), 0 = no vibration
+PRESS=5
+RELEASE=3
+# 0-4
+INTENSITY=3
+# overall haptic strength in percent (0-100); the touchpad's factory default is weaker
+STRENGTH=100

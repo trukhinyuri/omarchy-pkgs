@@ -1,0 +1,3 @@
+# Start the haptic click service when the ASUS ProArt P16 touchpad (PixArt
+# 093A:4F01 on i2c-hid) appears. Its hidraw node is the haptics interface.
+ACTION=="add", SUBSYSTEM=="hidraw", KERNELS=="*:093A:4F01.*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="asus-proart-touchpad-haptics.service"

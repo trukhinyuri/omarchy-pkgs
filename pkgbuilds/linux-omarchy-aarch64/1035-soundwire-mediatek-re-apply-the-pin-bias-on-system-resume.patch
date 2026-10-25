@@ -1,0 +1,47 @@
+From e917fb299235af67a6e171b91da76d46536d84b0 Mon Sep 17 00:00:00 2001
+From: "Yuri (IURII) Trukhin" <1245379+trukhinyuri@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 10:09:56 +0100
+Subject: [PATCH] soundwire: mediatek: re-apply the pin bias on system resume
+
+mtk_sdw_apply_pin_config() programs the bias of the SoundWire pads from
+the _CRS PinFunction entries (bus keeper on the data lines, pull-down on
+the clock lines) once, at probe. Link 1's pads are not in the always-on
+domain - the clock ops hold a VCORE request for that link while it runs
+and release it in system suspend - so after a long s2idle in which the
+SoC drops every audio vote the bias can come back at its reset default.
+Nothing reprograms it afterwards: the links restart with a floating
+data line and the peripherals see corrupted frames.
+
+Re-apply the pin configuration in the system resume path before the
+links are brought back. A failure only warns, the bias may still be
+intact.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/soundwire/mediatek/mtk-sdw.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw.c b/drivers/soundwire/mediatek/mtk-sdw.c
+index a14df4834..788258eb5 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw.c
++++ b/drivers/soundwire/mediatek/mtk-sdw.c
+@@ -1643,6 +1643,19 @@ static int mtk_sdw_resume(struct device *dev)
+ 		}
+ 	}
+ 
++	/*
++	 * The pad bias that probe programs from the _CRS PinFunction entries
++	 * (bus keeper on the data lines, pull-down on the clocks) is not part
++	 * of the always-on state: link 1's pads are outside the AO domain
++	 * (see the VCORE request in the clock ops) and the SoC may power that
++	 * area down once every audio vote is gone in a long s2idle. Nothing
++	 * else reprograms it, so restore it before the links restart. A
++	 * failure is not fatal: the bias may still be intact.
++	 */
++	ret = mtk_sdw_apply_pin_config(dev);
++	if (ret)
++		dev_warn(dev, "re-applying the pin bias failed: %d\n", ret);
++
+ 	/* 2. restore setting */
+ 	ret = mtk_sdw_restore_hw_settings(mst);
+ 	if (ret) {

@@ -1,0 +1,244 @@
+From 2aeae93f64e837b1f56b2203a414f4b72940d623 Mon Sep 17 00:00:00 2001
+From: "Yuri (IURII) Trukhin" <1245379+trukhinyuri@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 10:16:28 +0100
+Subject: [PATCH] ACPI: arm64: call the Modern Standby LPS0 _DSM around
+ suspend-to-idle
+
+The Microsoft Modern Standby _DSM (11e00d56-ce64-47ce-837b-1f898f9aa461)
+of the PNP0D80 device is evaluated around suspend-to-idle only by
+drivers/acpi/x86/s2idle.c. ACPI on arm64 installs no
+platform_s2idle_ops at all, so firmware that keys its sleep policy on
+these calls never learns that the system sleeps.
+
+The ASUS ProArt P16 H7607BA (NVIDIA N1x) is such firmware. Its \_SB.PEPD
+(NVDA6210, _CID PNP0D80) implements functions 3-9; they send the ASUS
+embedded controller its display-off (0xb7), Modern Standby (0x9a) and
+LPS0 (0xae) commands and the matching exit commands, notify PEPD, and on
+exit clear the FF-A wake state (\_SB.FFA0.ERST). Without them the EC keeps
+its awake fan policy through the whole sleep.
+
+Install s2idle ops that call the entry functions (display off, Modern
+Standby entry, LPS0 entry) once every device has finished its noirq
+suspend, and the exit functions before any device resumes, in the order
+x86 uses. What the functions do is firmware-specific, so only machines
+listed in a DMI table get them by default; acpi.lps0_dsm=1 enables them
+wherever the _DSM exists, acpi.lps0_dsm=0 nowhere, and
+acpi.lps0_dsm_funcs masks individual functions.
+
+Untested on hardware so far. If audio does not come back after a long
+sleep, or the codecs lose power on entry, mask functions with
+acpi.lps0_dsm_funcs (for example 0x018 for display off and on only) to
+find the one responsible.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/acpi/arm64/Kconfig  |  13 +++
+ drivers/acpi/arm64/Makefile |   1 +
+ drivers/acpi/arm64/lps0.c   | 165 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 179 insertions(+)
+ create mode 100644 drivers/acpi/arm64/lps0.c
+
+diff --git a/drivers/acpi/arm64/Kconfig b/drivers/acpi/arm64/Kconfig
+index f2fd79f22..bf8e80baf 100644
+--- a/drivers/acpi/arm64/Kconfig
++++ b/drivers/acpi/arm64/Kconfig
+@@ -24,3 +24,16 @@ config ACPI_APMT
+ 
+ config ACPI_MPAM
+ 	bool
++
++config ACPI_ARM64_LPS0
++	bool "Modern Standby (LPS0 _DSM) calls around suspend-to-idle"
++	depends on SUSPEND
++	default y
++	help
++	  Windows-compatible arm64 laptops describe a System Power Management
++	  Controller (PNP0D80) whose Microsoft Modern Standby _DSM tells the
++	  firmware and the embedded controller when the system enters and
++	  leaves suspend-to-idle, as drivers/acpi/x86/s2idle.c does on x86.
++
++	  The calls are made on the machines the driver lists, or on any
++	  machine booted with acpi.lps0_dsm=1. acpi.lps0_dsm=0 turns them off.
+diff --git a/drivers/acpi/arm64/Makefile b/drivers/acpi/arm64/Makefile
+index 9390b57cb..22cc435ab 100644
+--- a/drivers/acpi/arm64/Makefile
++++ b/drivers/acpi/arm64/Makefile
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ obj-$(CONFIG_ACPI_AGDI) 	+= agdi.o
+ obj-$(CONFIG_ACPI_APMT) 	+= apmt.o
++obj-$(CONFIG_ACPI_ARM64_LPS0)	+= lps0.o
+ obj-$(CONFIG_ACPI_FFH)		+= ffh.o
+ obj-$(CONFIG_ACPI_GTDT) 	+= gtdt.o
+ obj-$(CONFIG_ACPI_IORT) 	+= iort.o
+diff --git a/drivers/acpi/arm64/lps0.c b/drivers/acpi/arm64/lps0.c
+new file mode 100644
+index 000000000..d37b3cd91
+--- /dev/null
++++ b/drivers/acpi/arm64/lps0.c
+@@ -0,0 +1,165 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Modern Standby (LPS0 _DSM) notifications for suspend-to-idle on ACPI arm64
++ *
++ * drivers/acpi/x86/s2idle.c evaluates the Microsoft Modern Standby _DSM
++ * (11e00d56-ce64-47ce-837b-1f898f9aa461) of the Windows-compatible System
++ * Power Management Controller (PNP0D80) around suspend-to-idle. Nothing does
++ * on arm64, where ACPI installs no platform_s2idle_ops at all, so firmware
++ * that keys its sleep policy on these calls never learns that the system
++ * sleeps. On the ASUS ProArt P16 H7607BA (NVIDIA N1x) the functions send the
++ * embedded controller its display-off, Modern Standby and LPS0 commands and
++ * clear the FF-A wake state on exit; without them the EC keeps its awake fan
++ * policy for the whole sleep.
++ *
++ * Call the display-off, Modern Standby entry and LPS0 entry functions once
++ * every device has finished its noirq suspend, and the exit functions before
++ * any device's noirq resume, in the order x86 uses. Only the Microsoft
++ * functions 3-9 are called. What each one does is up to the firmware, so this
++ * runs only on the machines listed below, unless acpi.lps0_dsm=1 asks for it
++ * everywhere (or acpi.lps0_dsm=0 nowhere).
++ */
++
++#define pr_fmt(fmt) "ACPI: LPS0: " fmt
++
++#include <linux/acpi.h>
++#include <linux/bitops.h>
++#include <linux/dmi.h>
++#include <linux/init.h>
++#include <linux/moduleparam.h>
++#include <linux/suspend.h>
++#include <linux/uuid.h>
++
++#undef MODULE_PARAM_PREFIX
++#define MODULE_PARAM_PREFIX "acpi."
++
++#define ACPI_LPS0_SCREEN_OFF		3
++#define ACPI_LPS0_SCREEN_ON		4
++#define ACPI_LPS0_ENTRY			5
++#define ACPI_LPS0_EXIT			6
++#define ACPI_LPS0_MS_ENTRY		7
++#define ACPI_LPS0_MS_EXIT		8
++#define ACPI_LPS0_TURN_ON_DISPLAY	9
++
++#define ACPI_LPS0_FUNCS		GENMASK(ACPI_LPS0_TURN_ON_DISPLAY, ACPI_LPS0_SCREEN_OFF)
++
++static const guid_t lps0_dsm_guid_microsoft =
++	GUID_INIT(0x11e00d56, 0xce64, 0x47ce,
++		  0x83, 0x7b, 0x1f, 0x89, 0x8f, 0x9a, 0xa4, 0x61);
++
++/* The order of drivers/acpi/x86/s2idle.c. */
++static const u8 lps0_entry_funcs[] = {
++	ACPI_LPS0_SCREEN_OFF, ACPI_LPS0_MS_ENTRY, ACPI_LPS0_ENTRY,
++};
++
++static const u8 lps0_exit_funcs[] = {
++	ACPI_LPS0_EXIT, ACPI_LPS0_TURN_ON_DISPLAY, ACPI_LPS0_MS_EXIT, ACPI_LPS0_SCREEN_ON,
++};
++
++static int lps0_dsm = -1;
++module_param(lps0_dsm, int, 0444);
++MODULE_PARM_DESC(lps0_dsm,
++		 "Call the Modern Standby _DSM around suspend-to-idle (-1: on the machines known to need it [default], 0: never, 1: whenever the firmware has it)");
++
++static unsigned int lps0_dsm_funcs = ACPI_LPS0_FUNCS;
++module_param(lps0_dsm_funcs, uint, 0644);
++MODULE_PARM_DESC(lps0_dsm_funcs,
++		 "Bit mask of the _DSM functions to call (default 0x3f8: functions 3-9 that the firmware implements)");
++
++static const struct dmi_system_id lps0_dsm_dmi[] __initconst = {
++	{
++		/* ASUS ProArt P16 H7607BA (NVIDIA N1x) */
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "ASUSTeK COMPUTER INC."),
++			DMI_MATCH(DMI_BOARD_NAME, "H7607BA"),
++		},
++	},
++	{ }
++};
++
++static acpi_handle lps0_handle;
++static u64 lps0_mask;
++static bool lps0_entered;
++
++static void lps0_dsm_call(u8 func)
++{
++	union acpi_object *obj;
++
++	if (!(lps0_mask & lps0_dsm_funcs & BIT(func)))
++		return;
++
++	obj = acpi_evaluate_dsm(lps0_handle, &lps0_dsm_guid_microsoft, 0, func, NULL);
++	ACPI_FREE(obj);
++	acpi_handle_debug(lps0_handle, "_DSM function %u evaluated\n", func);
++}
++
++static int lps0_prepare_late(void)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(lps0_entry_funcs); i++)
++		lps0_dsm_call(lps0_entry_funcs[i]);
++	lps0_entered = true;
++
++	return 0;
++}
++
++static void lps0_restore_early(void)
++{
++	int i;
++
++	/* Also runs when a device failed its noirq suspend after the entry. */
++	if (!lps0_entered)
++		return;
++
++	for (i = 0; i < ARRAY_SIZE(lps0_exit_funcs); i++)
++		lps0_dsm_call(lps0_exit_funcs[i]);
++	lps0_entered = false;
++}
++
++static const struct platform_s2idle_ops lps0_s2idle_ops = {
++	.prepare_late = lps0_prepare_late,
++	.restore_early = lps0_restore_early,
++};
++
++static int __init acpi_arm64_lps0_init(void)
++{
++	struct acpi_device *adev;
++	union acpi_object *obj;
++	int i;
++
++	if (acpi_disabled || !lps0_dsm)
++		return 0;
++	if (lps0_dsm < 0 && !dmi_check_system(lps0_dsm_dmi))
++		return 0;
++	if (!(acpi_gbl_FADT.flags & ACPI_FADT_LOW_POWER_S0))
++		return 0;
++
++	adev = acpi_dev_get_first_match_dev("PNP0D80", NULL, -1);
++	if (!adev)
++		return 0;
++	lps0_handle = adev->handle;
++	acpi_dev_put(adev);
++
++	/* Function 0: bit n set when function n is implemented. */
++	obj = acpi_evaluate_dsm_typed(lps0_handle, &lps0_dsm_guid_microsoft, 0, 0, NULL,
++				      ACPI_TYPE_BUFFER);
++	if (!obj)
++		return 0;
++	for (i = 0; i < obj->buffer.length && i < sizeof(lps0_mask); i++)
++		lps0_mask |= (u64)obj->buffer.pointer[i] << (8 * i);
++	ACPI_FREE(obj);
++
++	if (!(lps0_mask & BIT(0)) || !(lps0_mask & ACPI_LPS0_FUNCS)) {
++		acpi_handle_info(lps0_handle, "Modern Standby _DSM implements no function (%#llx)\n",
++				 lps0_mask);
++		return 0;
++	}
++
++	acpi_handle_info(lps0_handle, "Modern Standby _DSM functions %#llx, calling %#llx\n",
++			 lps0_mask, lps0_mask & lps0_dsm_funcs & ACPI_LPS0_FUNCS);
++	s2idle_set_ops(&lps0_s2idle_ops);
++
++	return 0;
++}
++late_initcall(acpi_arm64_lps0_init);

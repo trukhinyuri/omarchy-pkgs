@@ -1,0 +1,36 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Mute the ASUS ProArt P16 H7607BA's tweeters while headphones are plugged in.
+#
+# The tweeters are the CS42L43's speaker amplifier. Omarchy's UCM profile for
+# this laptop feeds it from the same SoundWire port (DP5) as the headphone
+# output, so whatever plays on the headphones also plays on the tweeters. This
+# follows the codec's Headphone Jack control and switches the tweeters off
+# while a plug is in, as the proart-tweeter user service in proart-p16-linux
+# does (Leon Marzoll, GPL-2.0-only).
+
+set -uo pipefail
+
+card=${ASUS_PROART_P16_TWEETERS_CARD:-mt8901soundwire}
+
+apply() {
+  local state=on
+
+  if amixer -c "$card" cget iface=CARD,name='Headphone Jack' 2>/dev/null | grep -q ': values=on'; then
+    state=off
+  fi
+  amixer -q -c "$card" cset name='cs42l43 Speaker Digital Switch' "$state,$state"
+}
+
+apply || exit 1
+
+stdbuf -oL alsactl monitor "hw:CARD=$card" | while read -r line; do
+  if [[ $line == *"Headphone Jack"* ]]; then
+    apply
+  fi
+done
+
+# The monitor only ends when the card goes away; udev starts this again when
+# it comes back.
+exit 0

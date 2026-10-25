@@ -1,0 +1,17 @@
+[Unit]
+Description=Mute the ASUS ProArt P16 tweeters while headphones are plugged in
+Documentation=file:///usr/share/doc/asus-proart-p16-tweeters/README.md
+# The MT8901 SoundWire card has the same name on every N1x laptop.
+ConditionFirmware=smbios-field(board_name = "H7607BA")
+
+[Service]
+Type=simple
+SyslogIdentifier=asus-proart-p16-tweeters
+ExecStart=/usr/bin/asus-proart-p16-tweeters
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes

@@ -1,0 +1,3 @@
+# Start the tweeter jack follower once the NVIDIA N1x MT8901 SoundWire card is
+# registered. The service itself checks that this is an ASUS ProArt P16.
+ACTION=="add", SUBSYSTEM=="sound", KERNEL=="card*", ATTR{id}=="mt8901soundwire", TAG+="systemd", ENV{SYSTEMD_WANTS}+="asus-proart-p16-tweeters.service"

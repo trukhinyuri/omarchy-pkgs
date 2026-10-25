@@ -1,0 +1,26 @@
+# Maintainer: Yuri (IURII) Trukhin <1245379+trukhinyuri@users.noreply.github.com>
+# Contributor: Leon Marzoll (proart-tweeter)
+
+pkgname=asus-proart-p16-tweeters
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Mute the ASUS ProArt P16 (H7607BA) tweeters while headphones are plugged in'
+arch=('aarch64')
+url='https://github.com/trukhinyuri/proart-p16-linux'
+license=('GPL-2.0-only')
+depends=('alsa-utils' 'bash' 'coreutils')
+options=('!debug')
+source=(
+  '70-asus-proart-p16-tweeters.rules'
+  'README.package.md'
+  'asus-proart-p16-tweeters'
+  'asus-proart-p16-tweeters.service'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -Dm755 asus-proart-p16-tweeters "$pkgdir/usr/bin/asus-proart-p16-tweeters"
+  install -Dm644 asus-proart-p16-tweeters.service "$pkgdir/usr/lib/systemd/system/asus-proart-p16-tweeters.service"
+  install -Dm644 70-asus-proart-p16-tweeters.rules "$pkgdir/usr/lib/udev/rules.d/70-asus-proart-p16-tweeters.rules"
+  install -Dm644 README.package.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
